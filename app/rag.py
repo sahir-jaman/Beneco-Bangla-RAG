@@ -92,7 +92,8 @@ class BanglaRAG:
             ],
         )
 
-        sources = list(dict.fromkeys(c["meta"]["url"] for c in chunks if c["meta"]["url"]))[:3]
+        ordered = sorted(chunks, key=lambda c: c["meta"]["type"] == "blog")   # non-blog first
+        sources = list(dict.fromkeys(c["meta"]["url"] for c in ordered if c["meta"]["url"]))[:3]
         return {"answer": response.choices[0].message.content,
                 "sources": sources, "used_llm": True}
 

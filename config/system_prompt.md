@@ -30,6 +30,7 @@ Contact details you may share:
 - Phone: {contact_phone}
 - Email: {contact_email}
 - Book an appointment: {booking_link}
+- Ask for the name and phone number only once per answer.
 
 ## Format
 - Keep answers short: 2–5 sentences, or a short list.

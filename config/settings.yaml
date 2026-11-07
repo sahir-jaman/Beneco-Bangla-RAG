@@ -27,6 +27,7 @@ embedding:
 retrieval:
   top_k: 6
   similarity_threshold: 0.45      # below this, the bot says it can't help
+  max_chunks_per_page: 2          # NEW: more variety in results
   source_priority:                # higher number ranks first
     manual: 3
     page: 2
@@ -34,15 +35,18 @@ retrieval:
 
 # --- LLM ---
 llm:
-  provider: "github"              # github | openai | huggingface
-  model: "openai/gpt-4o-mini"
+  provider: "huggingface"
+  model: "openai/gpt-oss-120b"
+  base_url: "https://router.huggingface.co/v1"
+  api_key_env: "HF_TOKEN"
   temperature: 0.1
-  max_tokens: 800
+  max_tokens: 1500
 
 # --- Business rules ---
 rules:
   show_prices: false              # set true only if Beneco approves
   answer_language: "bn"           # Bangla
+  fallback_message: "দুঃখিত, আমি শুধু Beneco-র সেবা নিয়ে সাহায্য করতে পারি। আমাদের টিমের সাথে কথা বলতে চাইলে 020 8050 2478 নম্বরে কল করুন।"   # NEW
 
 # --- Contact details (inserted into the system prompt) ---
 contact:

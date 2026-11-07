@@ -55,3 +55,10 @@ contact:
 cleaning:
   boilerplate_min_pages: 4   # a line on this many pages or more counts as shared
   min_words_to_index: 50     # pages shorter than this are not indexed
+
+
+
+# --- Vector database ---
+vectorstore:
+  path: "chroma_db"          # folder inside the project
+  collection: "beneco"

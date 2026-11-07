@@ -26,7 +26,7 @@ embedding:
 # --- Retrieval ---
 retrieval:
   top_k: 6
-  similarity_threshold: 0.35      # below this, the bot says it can't help
+  similarity_threshold: 0.45      # below this, the bot says it can't help
   source_priority:                # higher number ranks first
     manual: 3
     page: 2
@@ -53,7 +53,7 @@ contact:
 
 # --- Cleaning ---
 cleaning:
-  boilerplate_min_pages: 4   # a line on this many pages or more counts as shared
+  boilerplate_min_pages: 3   # a line on this many pages or more counts as shared
   min_words_to_index: 50     # pages shorter than this are not indexed
 
 

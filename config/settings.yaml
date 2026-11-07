@@ -1,0 +1,57 @@
+# Beneco Bangla RAG — settings
+# Change values here instead of editing the code.
+
+# --- Website crawling ---
+website:
+  sitemap_url: "https://benecofinance.co.uk/sitemap_index.xml"
+  extra_urls: []                  # pages missing from the sitemap
+  skip_url_patterns:              # pages with no useful text
+    - "calculator"
+    - "cookie-policy"
+    - "privacy-notice"
+    - "accessibility-statement"
+    - "/blog/"
+  request_delay_seconds: 1        # be polite to the server
+
+# --- Chunking ---
+chunking:
+  chunk_size: 800
+  chunk_overlap: 150
+  min_chunk_chars: 80 
+
+# --- Embeddings ---
+embedding:
+  model: "BAAI/bge-m3"
+
+# --- Retrieval ---
+retrieval:
+  top_k: 6
+  similarity_threshold: 0.35      # below this, the bot says it can't help
+  source_priority:                # higher number ranks first
+    manual: 3
+    page: 2
+    blog: 1
+
+# --- LLM ---
+llm:
+  provider: "github"              # github | openai | huggingface
+  model: "openai/gpt-4o-mini"
+  temperature: 0.1
+  max_tokens: 800
+
+# --- Business rules ---
+rules:
+  show_prices: false              # set true only if Beneco approves
+  answer_language: "bn"           # Bangla
+
+# --- Contact details (inserted into the system prompt) ---
+contact:
+  phone: "020 8050 2478"
+  email: "info@benecofinance.co.uk"
+  booking_link: "https://link.thetopgeek.com/widget/booking/9HaZrxKaqubgZSEQgJl9"
+
+
+# --- Cleaning ---
+cleaning:
+  boilerplate_min_pages: 4   # a line on this many pages or more counts as shared
+  min_words_to_index: 50     # pages shorter than this are not indexed

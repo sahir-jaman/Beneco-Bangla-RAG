@@ -1,0 +1,17 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# Generated data (can be rebuilt with the scripts)
+data/raw/
+data/clean/
+data/chunks/
+data/urls.json
+chroma_db/
+
+# Editor
+.vscode/

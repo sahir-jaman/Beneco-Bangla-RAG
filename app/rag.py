@@ -34,6 +34,7 @@ deposit, fees, life insurance, income protection, business loan, asset finance,
 contact details, office address, opening hours.
 If the message only gives a name, phone number or email, output: contact details
 If the message is only a greeting, thanks or small talk (hi, hello, kemon asen, dhonnobad), output: greeting
+If the message asks for a joke, a fun fact, or is chit-chat not about money, homes, insurance or business, output: small talk
 Output only the query, nothing else."""
 
 

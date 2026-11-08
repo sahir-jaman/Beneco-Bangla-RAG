@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from pathlib import Path
+from fastapi.responses import FileResponse
 
 from app.rag import BanglaRAG
 
@@ -45,10 +47,12 @@ class ChatResponse(BaseModel):
 
 
 # ---------- routes ----------
-@app.get("/health")
-def health():
-    """Check the service is running and the database is loaded."""
-    return {"status": "ok", "chunks": app.state.rag.collection.count()}
+STATIC_DIR = Path(__file__).parent / "static"
+
+@app.get("/", response_class=FileResponse)
+def home():
+    """The chat page."""
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.post("/chat", response_model=ChatResponse)

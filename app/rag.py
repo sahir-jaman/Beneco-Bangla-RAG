@@ -13,11 +13,24 @@ load_dotenv(ROOT / ".env")
 REWRITE_PROMPT = """You turn customer messages into search queries for the website of
 Beneco Financial Services, a UK mortgage, insurance and business finance broker.
 The message may be in Bangla, Banglish (Bangla written in English letters) or English.
-Write ONE short English search query that captures what the customer wants.
+If a conversation is given, use it to understand what the latest message refers to
+(for example "this", "eta", "oita", "how much for that").
+
+Common Banglish and Bangla words:
+- sud, shud, সুদ = interest. "sud dite chai na" = wants interest-free, Sharia-compliant (Islamic) finance
+- bari, বাড়ি = house, home. bari kinte = buy a house
+- dokan, দোকান = shop. byabsa, business, ব্যবসা = business
+- lon, loan, লোন, rin, ঋণ = loan. taka, টাকা = money
+- kisti, কিস্তি = monthly payment, instalment
+- bima, বীমা = insurance. osustho = sick, ill
+- bhara, ভাড়া = rent. bhara dewar jonno = buy-to-let
+
+Write ONE short English search query that captures what the customer wants now.
 Use clear financial terms where they fit, for example: first-time buyer, mortgage,
 remortgage, home mover, buy-to-let, Sharia-compliant no-interest finance, bridging loan,
 deposit, fees, life insurance, income protection, business loan, asset finance,
 contact details, office address, opening hours.
+If the message only gives a name, phone number or email, output: contact details
 Output only the query, nothing else."""
 
 
@@ -44,6 +57,9 @@ class BanglaRAG:
         self.llm = OpenAI(base_url=s["llm"]["base_url"],
                           api_key=os.environ[s["llm"]["api_key_env"]])
 
+        # how many earlier messages the bot looks at
+        self.max_history = s.get("memory", {}).get("max_history_messages", 6)
+
     def _chat(self, messages, max_tokens):
         """One LLM call; retries once if the reply comes back empty."""
         llm_cfg = self.settings["llm"]
@@ -62,12 +78,30 @@ class BanglaRAG:
                 return text
         return ""
 
-    def rewrite_query(self, question):
-        """Add an English search query to the original message."""
+    def _recent(self, history):
+        """Keep only the last few messages, in the format the LLM expects."""
+        recent = []
+        for m in (history or [])[-self.max_history:]:
+            if m.get("role") in ("user", "assistant") and m.get("content"):
+                recent.append({"role": m["role"], "content": m["content"]})
+        return recent
+
+    def rewrite_query(self, question, history=None):
+        """Add an English search query to the original message, using the conversation."""
+        recent = self._recent(history)
+        if recent:
+            conversation = "\n".join(
+                f"{'Customer' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
+                for m in recent
+            )
+            user_text = f"CONVERSATION:\n{conversation}\n\nLATEST MESSAGE: {question}"
+        else:
+            user_text = question
+
         try:
             english = self._chat(
                 [{"role": "system", "content": REWRITE_PROMPT},
-                 {"role": "user", "content": question}],
+                 {"role": "user", "content": user_text}],
                 max_tokens=self.settings["llm"].get("rewrite_max_tokens", 1500),
             )
         except Exception:
@@ -83,10 +117,13 @@ class BanglaRAG:
         results = self.collection.query(query_embeddings=vector, n_results=r["top_k"] * 3)
 
         priority = r.get("source_priority", {})
+        exclude = set(r.get("exclude_types", []))
         candidates = []
         for doc, meta, distance in zip(results["documents"][0],
                                        results["metadatas"][0],
                                        results["distances"][0]):
+            if meta["type"] in exclude:          # e.g. skip old blog posts
+                continue
             score = 1 - distance
             bonus = 0.02 * priority.get(meta["type"], 0)   # service pages beat blogs
             candidates.append({"text": doc, "meta": meta,
@@ -109,20 +146,22 @@ class BanglaRAG:
                 break
         return picked
 
-    def answer(self, question):
-        """Rewrite, retrieve, then ask the LLM. Returns answer text and sources."""
-        search_text = self.rewrite_query(question)
+    def answer(self, question, history=None):
+        """Rewrite, retrieve, then ask the LLM with the recent conversation."""
+        search_text = self.rewrite_query(question, history)
         chunks = self.retrieve(search_text)
 
         context = "\n\n".join(
             f"[{i}] {c['meta']['title']} ({c['meta']['url'] or 'Beneco official'})\n{c['text']}"
             for i, c in enumerate(chunks, start=1)
         )
-        answer = self._chat(
-            [{"role": "system", "content": self.system_prompt},
-             {"role": "user", "content": f"CONTEXT:\n{context or '(empty)'}\n\nQUESTION: {question}"}],
-            max_tokens=self.settings["llm"]["max_tokens"],
+        messages = (
+            [{"role": "system", "content": self.system_prompt}]
+            + self._recent(history)
+            + [{"role": "user",
+                "content": f"CONTEXT:\n{context or '(empty)'}\n\nQUESTION: {question}"}]
         )
+        answer = self._chat(messages, max_tokens=self.settings["llm"]["max_tokens"])
         if not answer:
             answer = self.settings["rules"]["fallback_message"]
 
@@ -140,12 +179,15 @@ if __name__ == "__main__":
     print("Loading...")
     rag = BanglaRAG()
     print("Ready. Ask a question (empty line to quit).")
+    history = []                                   # terminal memory for testing
     while True:
         question = input("\nপ্রশ্ন: ").strip()
         if not question:
             break
-        result = rag.answer(question)
+        result = rag.answer(question, history)
         print("  search:", result["search_query"].replace("\n", " | "))
         print("\n" + result["answer"])
         for url in result["sources"]:
             print("  source:", url)
+        history.append({"role": "user", "content": question})
+        history.append({"role": "assistant", "content": result["answer"]})

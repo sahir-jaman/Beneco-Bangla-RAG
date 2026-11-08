@@ -49,12 +49,12 @@
   /* ---------- layout ---------- */
   .chat {
     width: 100%;
-    height: 100dvh;                  /* full screen on phones */
+    height: 100dvh;
     display: flex;
     flex-direction: column;
     background: var(--surface);
   }
-  @media (min-width: 768px) {        /* laptops: centred card */
+  @media (min-width: 768px) {
     .chat {
       max-width: 720px;
       height: calc(100dvh - 48px);
@@ -85,6 +85,18 @@
   .status::before {
     content: ""; width: 7px; height: 7px; border-radius: 50%; background: #22c55e;
   }
+  .new-chat {
+    margin-left: auto;
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font: inherit; font-size: 13px;
+    cursor: pointer;
+  }
+  .new-chat:hover { border-color: var(--text); }
 
   /* ---------- messages ---------- */
   #messages {
@@ -141,7 +153,7 @@
   #suggestions {
     display: flex; gap: 8px;
     padding: 0 16px 12px;
-    overflow-x: auto;                 /* sideways scroll on phones */
+    overflow-x: auto;
     scrollbar-width: none;
   }
   #suggestions::-webkit-scrollbar { display: none; }
@@ -175,7 +187,7 @@
     border-radius: 999px;
     padding: 12px 18px;
     font: inherit;
-    font-size: 16px;                 /* 16px stops iPhone zooming in */
+    font-size: 16px;
     outline: none;
     transition: border-color .15s;
   }
@@ -206,6 +218,7 @@
       <h1>Beneco বাংলা AI বন্ধু</h1>
       <div class="status">অনলাইন</div>
     </div>
+    <button class="new-chat" id="new-chat" type="button">নতুন চ্যাট</button>
   </header>
 
   <div id="messages"></div>
@@ -224,30 +237,65 @@
 </div>
 
 <script>
-  const messages = document.getElementById("messages");
-  const suggestions = document.getElementById("suggestions");
+  const messagesEl = document.getElementById("messages");
+  const suggestionsEl = document.getElementById("suggestions");
   const form = document.getElementById("form");
   const input = document.getElementById("input");
   const sendBtn = document.getElementById("send");
+  const newChatBtn = document.getElementById("new-chat");
 
-  const WELCOME = "স্বাগতম! আমি Beneco-র বাংলা AI বন্ধু। মর্টগেজ, ইন্স্যুরেন্স বা ব্যবসার লোন নিয়ে যেকোনো প্রশ্ন করুন।";
+  // ---------- settings ----------
+  const STORAGE_KEY = "beneco_chat_v1";
+  const KEEP_DAYS = 30;         // forget the chat after this many days
+  const MAX_HISTORY = 6;        // messages sent to the server with each question
+  const MAX_STORED = 50;        // messages kept in the browser
+
+  const WELCOME = "স্বাগতম! আমি Beneco বাংলা AI বন্ধু। মর্টগেজ, ইন্স্যুরেন্স বা ব্যবসার লোন নিয়ে যেকোনো প্রশ্ন করুন।";
+  const WELCOME_BACK = "আবার স্বাগতম! আপনার আগের কথোপকথন উপরে আছে। আজ কীভাবে সাহায্য করতে পারি?";
   const SUGGESTIONS = [
+    "রিমর্টগেজ কী?",
     "প্রথমবার বাড়ি কিনতে চাই",
     "ইসলামিক মর্টগেজ আছে?",
     "ব্যবসার জন্য লোন দরকার",
   ];
 
-  // turn "https://benecofinance.co.uk/remortgage/" into "remortgage"
-  function sourceLabel(url) {
-    const path = new URL(url).pathname.replace(/^\/|\/$/g, "");
-    return path ? path.replace(/-/g, " ") : "benecofinance.co.uk";
+  // ---------- saving and loading (browser storage) ----------
+  function newId() {
+    return (window.crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : String(Date.now()) + Math.random().toString(16).slice(2);
   }
 
+  function freshState() {
+    return { visitorId: newId(), updatedAt: Date.now(), messages: [] };
+  }
+
+  function loadState() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      const maxAge = KEEP_DAYS * 24 * 60 * 60 * 1000;
+      if (saved && Array.isArray(saved.messages) && Date.now() - saved.updatedAt < maxAge) {
+        return saved;
+      }
+    } catch (err) { /* storage blocked or broken: start fresh */ }
+    return freshState();
+  }
+
+  function saveState() {
+    state.updatedAt = Date.now();
+    state.messages = state.messages.slice(-MAX_STORED);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    catch (err) { /* storage full or blocked: chat still works, just not saved */ }
+  }
+
+  let state = loadState();
+
+  // ---------- drawing messages ----------
   function addMessage(text, who, sources = []) {
     const div = document.createElement("div");
     div.className = `msg ${who}`;
     div.textContent = text;                       // plain text only, safe
-    if (sources.length) {
+    if (sources && sources.length) {
       const box = document.createElement("div");
       box.className = "sources";
       box.textContent = "সূত্র:";
@@ -261,8 +309,8 @@
       });
       div.appendChild(box);
     }
-    messages.appendChild(div);
-    messages.scrollTop = messages.scrollHeight;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
     return div;
   }
 
@@ -270,8 +318,8 @@
     const div = document.createElement("div");
     div.className = "msg bot typing";
     div.innerHTML = "<span></span><span></span><span></span>";
-    messages.appendChild(div);
-    messages.scrollTop = messages.scrollHeight;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
     return div;
   }
 
@@ -280,21 +328,54 @@
     sendBtn.disabled = busy;
   }
 
+  function showSuggestions() {
+    suggestionsEl.innerHTML = "";
+    SUGGESTIONS.forEach(text => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = text;
+      btn.onclick = () => ask(text);
+      suggestionsEl.appendChild(btn);
+    });
+    suggestionsEl.style.display = "";
+  }
+
+  // draw the whole chat from saved state
+  function render() {
+    messagesEl.innerHTML = "";
+    addMessage(WELCOME, "bot");
+    state.messages.forEach(m =>
+      addMessage(m.content, m.role === "user" ? "user" : "bot", m.sources)
+    );
+    if (state.messages.length) {
+      addMessage(WELCOME_BACK, "bot");            // returning visitor
+      suggestionsEl.style.display = "none";
+    } else {
+      showSuggestions();                          // first visit
+    }
+  }
+
+  // ---------- talking to the server ----------
   async function ask(question) {
     question = question.trim();
     if (!question) return;
 
     addMessage(question, "user");
     input.value = "";
-    suggestions.style.display = "none";
+    suggestionsEl.style.display = "none";
     setBusy(true);
     const typing = showTyping();
+
+    // last few messages, without sources, for the server
+    const history = state.messages
+      .slice(-MAX_HISTORY)
+      .map(m => ({ role: m.role, content: m.content }));
 
     try {
       const res = await fetch("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: question }),
+        body: JSON.stringify({ message: question, history }),
       });
       const data = await res.json();
       typing.remove();
@@ -306,7 +387,13 @@
         addMessage(detail, "bot");
         return;
       }
+
       addMessage(data.answer, "bot", data.sources);
+
+      // remember this exchange
+      state.messages.push({ role: "user", content: question });
+      state.messages.push({ role: "assistant", content: data.answer, sources: data.sources });
+      saveState();
     } catch (err) {
       typing.remove();
       addMessage("সংযোগে সমস্যা হয়েছে। আবার চেষ্টা করুন।", "bot");
@@ -316,19 +403,20 @@
     }
   }
 
-  addMessage(WELCOME, "bot");
-  SUGGESTIONS.forEach(text => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = text;
-    btn.onclick = () => ask(text);
-    suggestions.appendChild(btn);
-  });
-
+  // ---------- buttons ----------
   form.addEventListener("submit", e => {
     e.preventDefault();
     ask(input.value);
   });
+
+  newChatBtn.addEventListener("click", () => {
+    state = freshState();
+    saveState();
+    render();
+    input.focus();
+  });
+
+  render();
 </script>
 </body>
 </html>

@@ -1,11 +1,12 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from pathlib import Path
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from app.rag import BanglaRAG
 
@@ -22,7 +23,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Beneco Bangla Chatbot API",
     description="Bangla RAG assistant for Beneco Financial Services",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -36,8 +37,14 @@ app.add_middleware(
 
 
 # ---------- request / response shapes ----------
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., max_length=4000)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=1000, examples=["remortgage ki?"])
+    history: list[ChatMessage] = Field(default_factory=list, max_length=20)
 
 
 class ChatResponse(BaseModel):
@@ -49,17 +56,25 @@ class ChatResponse(BaseModel):
 # ---------- routes ----------
 STATIC_DIR = Path(__file__).parent / "static"
 
+
 @app.get("/", response_class=FileResponse)
 def home():
     """The chat page."""
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/health")
+def health():
+    """Check the service is running and the database is loaded."""
+    return {"status": "ok", "chunks": app.state.rag.collection.count()}
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
-    """Send a customer question, get a Bangla answer with sources."""
+    """Send a customer question plus recent history, get a Bangla answer with sources."""
     try:
-        return app.state.rag.answer(request.message.strip())
+        history = [m.model_dump() for m in request.history]
+        return app.state.rag.answer(request.message.strip(), history)
     except Exception:
         logger.exception("Chat failed")
         raise HTTPException(

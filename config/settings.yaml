@@ -68,3 +68,9 @@ cleaning:
 vectorstore:
   path: "chroma_db"          # folder inside the project
   collection: "beneco"
+
+
+# --- Memory ---
+memory:
+  max_history_messages: 6      # earlier messages the bot reads (3 questions + 3 answers)
+  keep_days: 30                # how long the browser keeps the chat

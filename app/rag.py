@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 
+from app.leads import empty_lead, lead_summary, update_lead
+
 ROOT = Path(__file__).resolve().parents[1]     # app/ -> project folder
 load_dotenv(ROOT / ".env")
 
@@ -31,6 +33,7 @@ remortgage, home mover, buy-to-let, Sharia-compliant no-interest finance, bridgi
 deposit, fees, life insurance, income protection, business loan, asset finance,
 contact details, office address, opening hours.
 If the message only gives a name, phone number or email, output: contact details
+If the message is only a greeting, thanks or small talk (hi, hello, kemon asen, dhonnobad), output: greeting
 Output only the query, nothing else."""
 
 
@@ -146,7 +149,7 @@ class BanglaRAG:
                 break
         return picked
 
-    def answer(self, question, history=None):
+    def answer(self, question, history=None, lead=None):
         """Rewrite, retrieve, then ask the LLM with the recent conversation."""
         search_text = self.rewrite_query(question, history)
         chunks = self.retrieve(search_text)
@@ -156,7 +159,7 @@ class BanglaRAG:
             for i, c in enumerate(chunks, start=1)
         )
         messages = (
-            [{"role": "system", "content": self.system_prompt}]
+            [{"role": "system", "content": f"{self.system_prompt}\n\n{lead_summary(lead)}"}]
             + self._recent(history)
             + [{"role": "user",
                 "content": f"CONTEXT:\n{context or '(empty)'}\n\nQUESTION: {question}"}]
@@ -180,12 +183,15 @@ if __name__ == "__main__":
     rag = BanglaRAG()
     print("Ready. Ask a question (empty line to quit).")
     history = []                                   # terminal memory for testing
+    lead = empty_lead()                            # terminal customer record
     while True:
         question = input("\nপ্রশ্ন: ").strip()
         if not question:
             break
-        result = rag.answer(question, history)
+        lead, new_contact = update_lead(lead, question, history)
+        result = rag.answer(question, history, lead)
         print("  search:", result["search_query"].replace("\n", " | "))
+        print("  lead:", lead, "| new contact!" if new_contact else "")
         print("\n" + result["answer"])
         for url in result["sources"]:
             print("  source:", url)

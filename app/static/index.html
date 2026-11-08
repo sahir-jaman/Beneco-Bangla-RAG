@@ -266,8 +266,12 @@
       : String(Date.now()) + Math.random().toString(16).slice(2);
   }
 
+  function emptyLead() {
+    return { name: null, phone: null, email: null, declined: [] };
+  }
+
   function freshState() {
-    return { visitorId: newId(), updatedAt: Date.now(), messages: [] };
+    return { visitorId: newId(), updatedAt: Date.now(), messages: [], lead: emptyLead() };
   }
 
   function loadState() {
@@ -275,6 +279,7 @@
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
       const maxAge = KEEP_DAYS * 24 * 60 * 60 * 1000;
       if (saved && Array.isArray(saved.messages) && Date.now() - saved.updatedAt < maxAge) {
+        saved.lead = saved.lead || emptyLead();   // chats saved before this update had no lead
         return saved;
       }
     } catch (err) { /* storage blocked or broken: start fresh */ }
@@ -348,7 +353,9 @@
       addMessage(m.content, m.role === "user" ? "user" : "bot", m.sources)
     );
     if (state.messages.length) {
-      addMessage(WELCOME_BACK, "bot");            // returning visitor
+      // returning visitor: greet by name if we know it
+      const name = state.lead && state.lead.name;
+      addMessage(name ? `আবার স্বাগতম, ${name}! আজ কীভাবে সাহায্য করতে পারি?` : WELCOME_BACK, "bot");
       suggestionsEl.style.display = "none";
     } else {
       showSuggestions();                          // first visit
@@ -375,7 +382,7 @@
       const res = await fetch("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: question, history }),
+        body: JSON.stringify({ message: question, history, lead: state.lead }),
       });
       const data = await res.json();
       typing.remove();
@@ -393,6 +400,7 @@
       // remember this exchange
       state.messages.push({ role: "user", content: question });
       state.messages.push({ role: "assistant", content: data.answer, sources: data.sources });
+      if (data.lead) state.lead = data.lead;      // updated customer record from the server
       saveState();
     } catch (err) {
       typing.remove();

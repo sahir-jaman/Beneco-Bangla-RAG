@@ -10,6 +10,16 @@ from sentence_transformers import SentenceTransformer
 ROOT = Path(__file__).resolve().parents[1]     # app/ -> project folder
 load_dotenv(ROOT / ".env")
 
+REWRITE_PROMPT = """You turn customer messages into search queries for the website of
+Beneco Financial Services, a UK mortgage, insurance and business finance broker.
+The message may be in Bangla, Banglish (Bangla written in English letters) or English.
+Write ONE short English search query that captures what the customer wants.
+Use clear financial terms where they fit, for example: first-time buyer, mortgage,
+remortgage, home mover, buy-to-let, Sharia-compliant no-interest finance, bridging loan,
+deposit, fees, life insurance, income protection, business loan, asset finance,
+contact details, office address, opening hours.
+Output only the query, nothing else."""
+
 
 class BanglaRAG:
     def __init__(self):
@@ -34,12 +44,42 @@ class BanglaRAG:
         self.llm = OpenAI(base_url=s["llm"]["base_url"],
                           api_key=os.environ[s["llm"]["api_key_env"]])
 
-    def retrieve(self, question):
+    def _chat(self, messages, max_tokens):
+        """One LLM call; retries once if the reply comes back empty."""
+        llm_cfg = self.settings["llm"]
+        for attempt in range(2):
+            response = self.llm.chat.completions.create(
+                model=llm_cfg["model"],
+                temperature=llm_cfg["temperature"],
+                max_tokens=max_tokens,
+                messages=messages,
+            )
+            choice = response.choices[0]
+            text = (choice.message.content or "").strip()
+            print(f"LLM attempt={attempt + 1} finish_reason={choice.finish_reason} "
+                  f"chars={len(text)}", flush=True)
+            if text:
+                return text
+        return ""
+
+    def rewrite_query(self, question):
+        """Add an English search query to the original message."""
+        try:
+            english = self._chat(
+                [{"role": "system", "content": REWRITE_PROMPT},
+                 {"role": "user", "content": question}],
+                max_tokens=self.settings["llm"].get("rewrite_max_tokens", 1500),
+            )
+        except Exception:
+            english = ""            # if the rewrite fails, search with the original only
+        return f"{question}\n{english}" if english else question
+
+    def retrieve(self, search_text):
         """Find the best chunks: threshold, source priority, max 2 per page."""
         r = self.settings["retrieval"]
         threshold = r["similarity_threshold"]
 
-        vector = self.embedder.encode([question], normalize_embeddings=True).tolist()
+        vector = self.embedder.encode([search_text], normalize_embeddings=True).tolist()
         results = self.collection.query(query_embeddings=vector, n_results=r["top_k"] * 3)
 
         priority = r.get("source_priority", {})
@@ -52,7 +92,6 @@ class BanglaRAG:
             candidates.append({"text": doc, "meta": meta,
                                "score": score, "rank_score": score + bonus})
 
-        # off-topic: even the best match is too weak
         if not candidates or candidates[0]["score"] < threshold:
             return []
 
@@ -71,31 +110,30 @@ class BanglaRAG:
         return picked
 
     def answer(self, question):
-        """Retrieve chunks, then ask the LLM. Returns answer text and sources."""
-        chunks = self.retrieve(question)
-        if not chunks:
-            return {"answer": self.settings["rules"]["fallback_message"],
-                    "sources": [], "used_llm": False}
+        """Rewrite, retrieve, then ask the LLM. Returns answer text and sources."""
+        search_text = self.rewrite_query(question)
+        chunks = self.retrieve(search_text)
 
         context = "\n\n".join(
             f"[{i}] {c['meta']['title']} ({c['meta']['url'] or 'Beneco official'})\n{c['text']}"
             for i, c in enumerate(chunks, start=1)
         )
-        llm_cfg = self.settings["llm"]
-        response = self.llm.chat.completions.create(
-            model=llm_cfg["model"],
-            temperature=llm_cfg["temperature"],
-            max_tokens=llm_cfg["max_tokens"],
-            messages=[
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {question}"},
-            ],
+        answer = self._chat(
+            [{"role": "system", "content": self.system_prompt},
+             {"role": "user", "content": f"CONTEXT:\n{context or '(empty)'}\n\nQUESTION: {question}"}],
+            max_tokens=self.settings["llm"]["max_tokens"],
         )
+        if not answer:
+            answer = self.settings["rules"]["fallback_message"]
 
-        ordered = sorted(chunks, key=lambda c: c["meta"]["type"] == "blog")   # non-blog first
+        # show only clearly relevant sources, service pages first, max 3
+        min_score = self.settings["retrieval"].get("source_min_score", 0.55)
+        shown = [c for c in chunks if c["score"] >= min_score]
+        ordered = sorted(shown, key=lambda c: c["meta"]["type"] == "blog")
         sources = list(dict.fromkeys(c["meta"]["url"] for c in ordered if c["meta"]["url"]))[:3]
-        return {"answer": response.choices[0].message.content,
-                "sources": sources, "used_llm": True}
+
+        return {"answer": answer, "sources": sources,
+                "used_llm": True, "search_query": search_text}
 
 
 if __name__ == "__main__":
@@ -107,6 +145,7 @@ if __name__ == "__main__":
         if not question:
             break
         result = rag.answer(question)
+        print("  search:", result["search_query"].replace("\n", " | "))
         print("\n" + result["answer"])
         for url in result["sources"]:
             print("  source:", url)
